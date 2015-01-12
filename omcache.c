@@ -45,7 +45,7 @@
       } \
     } })
 #define omc_srv_log(pri,srv,fmt,...) \
-    omc_log(pri, "[%s:%s] " fmt, (srv)->hostname, (srv)->port, __VA_ARGS__)
+    omc_log(pri, "%s:%s%s " fmt, (srv)->hostname, (srv)->port, (srv)->pref_ip_address, __VA_ARGS__)
 
 #ifndef NDEBUG
 #  define omc_debug(...) omc_log(LOG_DEBUG, __VA_ARGS__)
@@ -70,6 +70,8 @@ typedef struct omc_srv_s
   int sock;
   char *hostname;
   char *port;
+  // preformatted ip address in brackets for logging (" [127.0.0.1]")
+  char pref_ip_address[2 + 39 + 2];
   struct addrinfo *addrs;
   struct addrinfo *addrp;
 #ifdef WITH_ASYNCNS
@@ -812,6 +814,21 @@ static int omc_srv_connect(omcache_t *mc, omc_srv_t *srv)
               return OMCACHE_SERVER_FAILURE;
             }
           omc_int_hash_table_add(mc->fd_table, sock, srv->list_index);
+          // render the address in plain-text for logging
+          srv->pref_ip_address[0] = 0;
+          err = getnameinfo(srv->addrp->ai_addr, srv->addrp->ai_addrlen,
+                            srv->pref_ip_address + 2, sizeof(srv->pref_ip_address) - 3,
+                            NULL, 0, NI_NUMERICHOST | NI_NUMERICSERV);
+          if (err)
+            {
+              omc_srv_log(LOG_WARNING, srv, "getnameinfo failed: %s", gai_strerror(err));
+            }
+          else if (strcmp(srv->pref_ip_address + 2, srv->hostname))
+            {
+              srv->pref_ip_address[0] = ' ';
+              srv->pref_ip_address[1] = '[';
+              strcat(srv->pref_ip_address, "]");
+            }
           err = connect(sock, srv->addrp->ai_addr, srv->addrp->ai_addrlen);
           srv->dead_timeout_start = now;
           srv->addrp = srv->addrp->ai_next;
